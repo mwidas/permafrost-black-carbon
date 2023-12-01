@@ -1,0 +1,44 @@
+---
+title: "permafrost-black-carbon"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Load Data
+
+```{r}
+library(here)
+library(tidyverse)
+library(lubridate)
+```
+
+```{r}
+black_carbon <- read_csv(here("data", "us-epa-pm25-aqi.csv"))
+air_temp <- read_csv(here("data", "24-hour_data.csv"))
+soil_temp <- read_csv(here("data", "3-hour_data.csv"))
+```
+
+```{r}
+class(black_carbon$DateTime)
+head(air_temp)
+head(soil_temp)
+```
+
+```{r}
+black_carbon$DateTime <- as.Date(black_carbon$DateTime) 
+black_carbon <- black_carbon %>% 
+  rename(date = DateTime)
+head(black_carbon)
+```
+
+```{r}
+head(soil_temp)
+soil_temp <- soil_temp %>% 
+  filter(hour == "300")
+head(soil_temp)
+
+```
