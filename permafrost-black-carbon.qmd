@@ -19,26 +19,71 @@ library(lubridate)
 ```{r}
 black_carbon <- read_csv(here("data", "us-epa-pm25-aqi.csv"))
 air_temp <- read_csv(here("data", "24-hour_data.csv"))
-soil_temp <- read_csv(here("data", "3-hour_data.csv"))
+soil <- read_csv(here("data", "3-hour_data.csv"))
 ```
 
 ```{r}
-class(black_carbon$DateTime)
 head(air_temp)
-head(soil_temp)
+head(soil)
 ```
 
 ```{r}
 black_carbon$DateTime <- as.Date(black_carbon$DateTime) 
-black_carbon <- black_carbon %>% 
-  rename(date = DateTime)
-head(black_carbon)
+black_carbon_2 <- black_carbon %>% 
+  rename(date = DateTime) %>% 
+  subset(select = -Average) %>% 
+  rename(b_c = `Toolik Field Station A`)
+head(black_carbon_2)
 ```
 
 ```{r}
-head(soil_temp)
-soil_temp <- soil_temp %>% 
-  filter(hour == "300")
-head(soil_temp)
+soil_2 <- soil %>% 
+  filter(hour == "300") %>% 
+  subset(select = -hour) %>% 
+  rename(soil_temp = soil1_150cm)
+  
+head(soil_temp_2)
+```
 
+```{r}
+air_temp_updated <- air_temp %>% 
+  select(air_temp_max_3m, date) %>% 
+  rename(air_temp = air_temp_max_3m)
+```
+
+```{r}
+combined_bc_st <- left_join(black_carbon_2, soil_2, by = 'date')
+head(combined)
+
+full <- left_join(combined_bc_st, air_temp_updated, by = 'date')
+head(full)
+```
+
+```{r}
+permafrost_mod <- summary(lm(soil_temp ~ air_temp, data = full))
+print(permafrost_mod)
+```
+
+```{r}
+ggplot(data = full, aes(x = air_temp, y = soil_temp)) +
+  geom_point() +
+  theme_minimal() +
+  geom_smooth(se=FALSE)
+```
+
+```{r}
+ggplot(data = full, aes(x = log(b_c), y = soil_temp)) +
+  geom_point() +
+  theme_minimal() +
+  geom_smooth(se=FALSE)
+```
+
+```{r}
+permafrost_mod_2 <- summary(lm(soil_temp ~ air_temp + b_c, data = full))
+print(permafrost_mod_2)
+```
+
+```{r}
+permafrost_mod_3 <- summary(lm(soil_temp ~ air_temp + b_c + air_temp:b_c, data = full))
+print(permafrost_mod_3)
 ```
