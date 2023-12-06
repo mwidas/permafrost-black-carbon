@@ -4,9 +4,25 @@ format: html
 editor: visual
 ---
 
-## Quarto
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+
+
+
+
+## Data
+
+https://map.purpleair.com/1/mAQI/a10080/p604800/cC0?inc=698715&select=26423#13.58/68.62791/-149.60342
+
+- black carbon
+
+https://www.uaf.edu/toolik/edc/monitoring/abiotic/met-data-query.php
+
+- soil temperature and weather
+
+citation: 
+Environmental Data Center Team. Year of data retrieval. Meteorological monitoring program at Toolik, Alaska. Toolik Field Station, Institute of Arctic Biology, University of Alaska Fairbanks, Fairbanks, AK 99775. https://www.uaf.edu/toolik/edc/monitoring/abiotic/met-data-query.php
+
 
 ## Load Data
 
@@ -21,6 +37,7 @@ library(gt)
 library(tufte)
 library(feasts)
 library(tsibble)
+library(sjPlot)
 ```
 
 ```{r, warning=FALSE}
@@ -51,7 +68,7 @@ black_carbon$DateTime <- as.Date(black_carbon$DateTime)
 black_carbon_2 <- black_carbon %>% 
   rename(date = DateTime) %>%  #rename date column to match other df's
   mutate(b_c = (`Toolik Field Station A`+`Toolik Field Station B`)/2) %>% # average the two field station measurements
-  mutate(log_b_c = log(b_c)) %>%  #b_c is not normally distributed so take log to correct for this
+  mutate(log_b_c = (log(b_c)+1)) %>%  #b_c is not normally distributed so take log to correct for this
   subset(select = -c(Average,`Toolik Field Station A`, `Toolik Field Station B`))  # remove unecessary columns
   
 black_carbon_2$log_b_c[black_carbon_2$log_b_c == -Inf] <- 0 # change -Inf values created by log function to 0 to allow regressions to run
@@ -140,13 +157,64 @@ permafrost_mod_2 <- summary(lm(soil_temp ~ air_temp + log_b_c, data = full))
 print(permafrost_mod_2)
 ```
 
+We use an interaction model to achieve this:
+
+$$ soiltemp_i=\beta_{0}+\beta_{1} \cdot airtemp_i + \beta_{2} \cdot log(black carbon)_i + \beta_{3} \cdot airtemp_i \cdot log(blackcarbon)_i + \varepsilon_i$$
+
 ```{r}
 # run linear regression on soil temp using air temp and black carbon as well as an interaction between black carbon and air temperature
-permafrost_mod_3 <- summary(lm(soil_temp ~ air_temp + air_temp:log_b_c, data = full))
-print(permafrost_mod_3)
+permafrost_mod_3 <- lm(soil_temp ~ air_temp + log_b_c + air_temp:log_b_c, data = full)
+permafrost_mod_3_summ <- summary(permafrost_mod_3)
+print(permafrost_mod_3_summ)
 ```
 
-## Does black carbon have a seasonal trend?
+```{r}
+permafrost_table <- permafrost_mod_3 %>%
+  tab_model()
+
+permafrost_table
+ # kbl(caption = "Recreating booktabs style table") %>%
+ # kable_classic(full_width = F, html_font = "Cambria")
+```
+
+Hypothesis Testing 1: 
+
+$$H_{0}:$$ There is no effect of air temperature on soil temperature. 
+$$H_{A}:$$ There is an effect of air temperature on soil temperature. 
+
+  - significant at 5%
+  
+Hypothesis Testing 2: 
+$$H_{0}:$$ There is no effect of black carbon on soil temperature. 
+$$H_{A}:$$ There is an effect of black carbon on soil temperature. 
+
+  - significant at 10% level
+
+Hypothesis Testing 3:
+
+$$H_{0}:$$ there is no effects of air temperature that differs by blackcarbon levels on soil temperature
+$$H_{A}:$$ There is an effect of air temperature and black carbon on soil temperature.
+  
+   - not significant
+  
+Interpretations : 
+
+$$\beta_{0}$$ = When air temperature is 0 degrees Celcius and the black carbon level is 0 the predicted soil temperature is -1.74 degrees Celsius.
+
+$$\beta_{1}$$ = There is a 0.06 predicted increase in soil temperature in degrees Celsius for every 1 degress celsius increase in air temperature holding black carbon fixed
+
+$$\beta_{2}$$ = There is a 1 percent decrease predicted in soil temperature in degrees Celsius for every 0.0034 ppm increase in black carbon holding air temperature fixed.
+
+
+0.06>0.0034 so black carbon is less significant than temperature
+
+```{r}
+
+```
+
+## Additional Exploration
+
+Does black carbon have a seasonal trend?
 
 ```{r}
 permafrost <- as_tsibble(full) %>% 
@@ -180,7 +248,7 @@ sources : https://journals.ametsoc.org/view/journals/wefo/36/5/WAF-D-21-0028.1.x
 
 let's try removing this event and seeing if our models are improved
 
-## Remove 
+## Remove
 
 ```{r}
 permafrost_full <- permafrost %>% 
