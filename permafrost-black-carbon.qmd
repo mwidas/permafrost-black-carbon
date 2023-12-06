@@ -10,80 +10,188 @@ Quarto enables you to weave together content and executable code into a finished
 
 ## Load Data
 
-```{r}
+Load packages and libraries needed to complete this analyis.
+
+```{r, warning=FALSE}
 library(here)
 library(tidyverse)
 library(lubridate)
+library(readr)
+library(gt)
+library(tufte)
+library(feasts)
+library(tsibble)
 ```
 
-```{r}
+```{r, warning=FALSE}
+# load data that contains pm2.5 which will be used as a representation of black carbon
 black_carbon <- read_csv(here("data", "us-epa-pm25-aqi.csv"))
+
+# load data that contains air temperature in degrees Celcius for Lake Toolik, Alaska
 air_temp <- read_csv(here("data", "24-hour_data.csv"))
+
+# load data that has soil temperature in degrees Celcius for first 150 cm
 soil <- read_csv(here("data", "3-hour_data.csv"))
 ```
 
 ```{r}
+# examin dataframes
 head(air_temp)
 head(soil)
+head(black_carbon)
 ```
 
+## Clean Data for Use
+
 ```{r}
+# black carbon date information is stored as POSIXct so switch to date type
 black_carbon$DateTime <- as.Date(black_carbon$DateTime) 
+
+
 black_carbon_2 <- black_carbon %>% 
-  rename(date = DateTime) %>% 
-  subset(select = -Average) %>% 
-  rename(b_c = `Toolik Field Station A`)
-head(black_carbon_2)
-```
-
-```{r}
-soil_2 <- soil %>% 
-  filter(hour == "300") %>% 
-  subset(select = -hour) %>% 
-  rename(soil_temp = soil1_150cm)
+  rename(date = DateTime) %>%  #rename date column to match other df's
+  mutate(b_c = (`Toolik Field Station A`+`Toolik Field Station B`)/2) %>% # average the two field station measurements
+  mutate(log_b_c = log(b_c)) %>%  #b_c is not normally distributed so take log to correct for this
+  subset(select = -c(Average,`Toolik Field Station A`, `Toolik Field Station B`))  # remove unecessary columns
   
-head(soil_temp_2)
+black_carbon_2$log_b_c[black_carbon_2$log_b_c == -Inf] <- 0 # change -Inf values created by log function to 0 to allow regressions to run
+
+# view edited data
+head(black_carbon_2) 
 ```
 
 ```{r}
+# create updated soil temperature df
+soil_2 <- soil %>% 
+  filter(hour == "300") %>% # choose all values recorded at hour 300
+  subset(select = -hour) %>% # remove hour column
+  rename(soil_temp = soil1_150cm) # rename column for readability
+
+# view updated soil dataframe
+head(soil_2)
+```
+
+```{r}
+# create updated air temperature df
 air_temp_updated <- air_temp %>% 
-  select(air_temp_max_3m, date) %>% 
-  rename(air_temp = air_temp_max_3m)
+  select(air_temp_max_3m, date) %>% # select columns to keep
+  rename(air_temp = air_temp_max_3m) # rename air_temp for readability
 ```
 
-```{r}
-combined_bc_st <- left_join(black_carbon_2, soil_2, by = 'date')
-head(combined)
+## Combine data
 
-full <- left_join(combined_bc_st, air_temp_updated, by = 'date')
+```{r}
+# create new df containing black carbon and soil temp data
+combined_bc_st <- left_join(black_carbon_2, soil_2, by = 'date')
+
+# create new df with black carbon, soil temp, and air temp data
+full <- left_join(combined_bc_st, air_temp_updated, by = 'date') %>% 
+  drop_na() # remove na values 
+
+# view edited df
 head(full)
 ```
 
-```{r}
-permafrost_mod <- summary(lm(soil_temp ~ air_temp, data = full))
-print(permafrost_mod)
-```
+## Examine Data
 
 ```{r}
 ggplot(data = full, aes(x = air_temp, y = soil_temp)) +
   geom_point() +
   theme_minimal() +
-  geom_smooth(se=FALSE)
+  geom_smooth(method = lm) +
+  labs(x = "Air Temperature Degrees Celcius", y = "Soil Temperature Degrees Celcius")
 ```
 
 ```{r}
-ggplot(data = full, aes(x = log(b_c), y = soil_temp)) +
+# plot black carbon and soil temp to see if linear regression is appropriate
+ggplot(data = full, aes(x = b_c, y = soil_temp)) +
   geom_point() +
   theme_minimal() +
-  geom_smooth(se=FALSE)
+  geom_smooth(method = lm) +
+  labs(x = "PM2.5 (ppm)", y = "Soil Temperature Degrees Celcius")
+
+# clustering of data, use a histogram to examine the distribution
+hist(full$b_c)
 ```
 
 ```{r}
-permafrost_mod_2 <- summary(lm(soil_temp ~ air_temp + b_c, data = full))
+# re-axamine black carbon with a log transformation applied
+ggplot(data = full, aes(x = log_b_c, y = soil_temp)) +
+  geom_point() +
+  theme_minimal() +
+  geom_smooth(method = lm) +
+  labs(x = "PM2.5 (ppm)", y = "Soil Temperature Degrees Celcius")
+
+# re-axamine black carbon with a log transformation applied
+hist(full$log_b_c)
+```
+
+## Linear Regression
+
+```{r}
+# run linear regression on soil temp using air temp as predictor
+permafrost_mod <- summary(lm(soil_temp ~ air_temp, data = full))
+print(permafrost_mod)
+```
+
+```{r}
+# run linear regression on soil temp using air temp and black carbon as predictors
+permafrost_mod_2 <- summary(lm(soil_temp ~ air_temp + log_b_c, data = full))
 print(permafrost_mod_2)
 ```
 
 ```{r}
-permafrost_mod_3 <- summary(lm(soil_temp ~ air_temp + b_c + air_temp:b_c, data = full))
+# run linear regression on soil temp using air temp and black carbon as well as an interaction between black carbon and air temperature
+permafrost_mod_3 <- summary(lm(soil_temp ~ air_temp + air_temp:log_b_c, data = full))
 print(permafrost_mod_3)
+```
+
+## Does black carbon have a seasonal trend?
+
+```{r}
+permafrost <- as_tsibble(full) %>% 
+  fill_gaps()
+
+permafrost_2020 <- permafrost %>% 
+  filter(between(date, as.Date('2019-12-29'), as.Date('2021-01-03')))
+
+permafrost_2 <- permafrost_2020 %>% 
+  mutate(date = date(date)) %>%
+  ggplot(., aes(x = date, y = log_b_c)) +
+  geom_line() +
+  labs(x = 'Date', y = 'bc', title = 'black carbon') +
+  theme_linedraw()
+
+permafrost_2
+```
+
+```{r}
+permafrost_3 <- permafrost_2020 %>% 
+  model(STL(log_b_c, type = "additive")) %>% 
+  components() %>% 
+  autoplot()
+
+permafrost_3
+```
+
+we have a large jump in our data occuring in septemper of 2020...there were major wildfires in the PNW in September 2020 that could be causing our models to overpredict
+
+sources : https://journals.ametsoc.org/view/journals/wefo/36/5/WAF-D-21-0028.1.xml
+
+let's try removing this event and seeing if our models are improved
+
+## Remove 
+
+```{r}
+permafrost_full <- permafrost %>% 
+  filter(between(date, as.Date('2019-12-29'), as.Date('2023-11-19')))
+
+permafrost_3 <- permafrost_full %>% 
+  mutate(date = date(date)) %>%
+  ggplot(., aes(x = date, y = log_b_c)) +
+  geom_line() +
+  labs(x = 'Date', y = 'bc', title = 'black carbon') +
+  theme_linedraw()
+
+permafrost_3
 ```
